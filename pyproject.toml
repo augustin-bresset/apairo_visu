@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apairo-visu"
+version = "0.1.0"
+description = "Interactive 3D LiDAR visualisation for apairo datasets"
+authors = [
+  { name = "Augustin Bresset", email = "augustin.bresset@gmail.com" },
+]
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "apairo",
+    "numpy",
+    "open3d",
+    "PyYAML",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["apairo_visu*"]
+
+[tool.setuptools.package-data]
+apairo_visu = ["configs/*.yaml"]
