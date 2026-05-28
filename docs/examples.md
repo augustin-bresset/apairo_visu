@@ -84,11 +84,70 @@ import numpy as np
 ds_raw = apairo.TartanKittiDataset(seq_dir, keys=["velodyne_0", "super_odom"])
 ds = apairo_visu.NearestSyncDataset(ds_raw, reference_key="velodyne_0")
 
-# sample.data now contains both keys, synchronized
+# sample.data now contains both keys, synchronized to the LiDAR timestamps
 sample = ds[0]
 print(sample.data["velodyne_0"].shape)   # (N, 3)
 print(sample.data["super_odom"].shape)   # (7,)
 ```
+
+---
+
+## Pipeline comparison
+
+Use `pipelines=` to compare multiple processing strategies side-by-side.  
+See [`examples/view_pipelines.py`](../examples/view_pipelines.py) for the full runnable script.
+
+### Validate a preprocessing step
+
+```python
+import apairo_visu
+from apairo_visu import Pipeline
+import numpy as np
+
+def range_filter(pts, labels, min_r=1.0, max_r=50.0):
+    r = np.linalg.norm(pts[:, :3], axis=1)
+    mask = (r >= min_r) & (r <= max_r)
+    return pts[mask], labels[mask] if labels is not None else None
+
+apairo_visu.LidarViewer.launch(ds, label_cfg=cfg, pipelines=[
+    Pipeline("Raw"),
+    Pipeline("Range filter", [range_filter]),
+])
+```
+
+### Compare two models
+
+```python
+apairo_visu.LidarViewer.launch(ds, label_cfg=cfg, pipelines=[
+    Pipeline("Ground truth"),
+    Pipeline("Model A", [preprocess, model_a]),
+    Pipeline("Model B", [preprocess, model_b]),
+])
+```
+
+Each pipeline step is a callable `(pts, labels) → (pts, labels)`:
+
+```python
+def model_a(pts, labels):
+    logits = net_a(torch.from_numpy(pts).cuda())
+    pred   = logits.argmax(dim=-1).cpu().numpy().astype(np.int64)
+    return pts, pred
+```
+
+Pipelines run in **parallel** — each viewport updates as soon as its pipeline finishes.  Elapsed time per pipeline is shown in the left panel.
+
+### Compare preprocessing strategies + model
+
+```python
+apairo_visu.LidarViewer.launch(ds, label_cfg=cfg, pipelines=[
+    Pipeline("Raw"),
+    Pipeline("Preprocess A",    [preprocess_a]),
+    Pipeline("Preprocess A + model", [preprocess_a, model]),
+    Pipeline("Preprocess B + model", [preprocess_b, model]),
+])
+```
+
+---
 
 ## CLI
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from .viewer import LidarViewer, ViewConfig
+from .viewer import LidarViewer, ViewConfig, Pipeline
 from .sync import NearestSyncDataset
 
 _CONFIGS_DIR = Path(__file__).parent / "configs"
@@ -33,6 +33,7 @@ def load_label_config(name_or_path: str | Path) -> dict:
 __all__ = [
     "LidarViewer",
     "ViewConfig",
+    "Pipeline",
     "NearestSyncDataset",
     "load_label_config",
     "BUILTIN_CONFIGS",
