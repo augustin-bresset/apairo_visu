@@ -216,22 +216,28 @@ class LidarViewer:
         self._cached_pts:        list[np.ndarray | None]      = [None] * n
         self._cached_labels:     list[np.ndarray | None]      = [None] * n
         self._camera_initialized: list[bool]                  = [False] * n
+        self._pipeline_active:   list[bool]                   = [True]  * n
+
+        # Raw frame cache — shared across all pipelines, refreshed on navigation
+        self._raw_pts:    np.ndarray | None = None
+        self._raw_labels: np.ndarray | None = None
 
         # Parallel execution
         self._executor   = ThreadPoolExecutor(max_workers=max(n, 1))
         self._refresh_id = 0  # bumped on each navigation; discards stale callbacks
 
         # Shared panel widget refs
-        self._window:        gui.Window | None    = None
-        self._panel:         gui.Vert  | None     = None
-        self._lbl_frame:     gui.Label | None     = None
-        self._lbl_npts:      gui.Label | None     = None
-        self._lbl_stats:     gui.Label | None     = None
-        self._timing_labels: list[gui.Label]      = []
-        self._checkboxes:    dict[int, gui.Checkbox] = {}
-        self._mode_combo:    gui.Combobox | None  = None
-        self._cb_traj:       gui.Checkbox | None  = None
-        self._show_traj:     bool                 = False
+        self._window:              gui.Window | None       = None
+        self._panel:               gui.Vert   | None       = None
+        self._lbl_frame:           gui.Label  | None       = None
+        self._lbl_npts:            gui.Label  | None       = None
+        self._lbl_stats:           gui.Label  | None       = None
+        self._timing_labels:       list[gui.Label]         = []
+        self._pipeline_checkboxes: list[gui.Checkbox]      = []
+        self._checkboxes:          dict[int, gui.Checkbox] = {}
+        self._mode_combo:          gui.Combobox | None     = None
+        self._cb_traj:             gui.Checkbox | None     = None
+        self._show_traj:           bool                    = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -361,6 +367,19 @@ class LidarViewer:
             panel.add_child(cb_traj)
             panel.add_child(gui.Label(""))
 
+        # Active pipeline toggles — check/uncheck to show/hide individual viewports
+        if multi:
+            panel.add_child(self._section_label("Active pipelines", em))
+            for i, pipeline in enumerate(self._pipelines):
+                cb = gui.Checkbox(pipeline.name)
+                cb.checked = True
+                cb.set_on_checked(
+                    lambda checked, idx=i: self._on_pipeline_toggle(idx, checked)
+                )
+                self._pipeline_checkboxes.append(cb)
+                panel.add_child(cb)
+            panel.add_child(gui.Label(""))
+
         # Per-pipeline timing (only in multi-pipeline mode)
         if multi:
             panel.add_child(self._section_label("Pipelines", em))
@@ -429,14 +448,26 @@ class LidarViewer:
         n          = len(self._scenes)
         multi      = n > 1
         vp_total_w = r.width - PANEL_W
-        vp_w       = vp_total_w / n
         lh         = BANNER_H if multi else 0
 
+        # Distribute width only among active viewports; inactive ones are pushed
+        # off-screen with a 1×1 frame to avoid a zero-size render target.
+        active = [i for i in range(n) if self._pipeline_active[i]]
+        vp_w   = vp_total_w / len(active) if active else vp_total_w
+        off_x  = r.x + r.width + 10  # off-screen position for hidden viewports
+
+        slot = 0
         for i, scene in enumerate(self._scenes):
-            x = r.x + PANEL_W + i * vp_w
-            if multi:
-                self._banner_labels[i].frame = gui.Rect(x, r.y, vp_w, lh)
-            scene.frame = gui.Rect(x, r.y + lh, vp_w, r.height - lh)
+            if not self._pipeline_active[i]:
+                if multi:
+                    self._banner_labels[i].frame = gui.Rect(off_x, r.y, 1, 1)
+                scene.frame = gui.Rect(off_x, r.y, 1, 1)
+            else:
+                x = r.x + PANEL_W + slot * vp_w
+                if multi:
+                    self._banner_labels[i].frame = gui.Rect(x, r.y, vp_w, lh)
+                scene.frame = gui.Rect(x, r.y + lh, vp_w, r.height - lh)
+                slot += 1
 
     # ------------------------------------------------------------------
     # Navigation event handlers
@@ -464,6 +495,39 @@ class LidarViewer:
             self._scenes[0].scene.remove_geometry("traj_past")
             self._scenes[0].scene.remove_geometry("traj_future")
 
+    def _on_pipeline_toggle(self, i: int, checked: bool) -> None:
+        self._pipeline_active[i] = checked
+        self._on_layout(None)       # redistribute viewport widths immediately
+        self._window.post_redraw()
+        if checked and self._cached_pts[i] is None:
+            self._run_single_pipeline(i)
+
+    def _run_single_pipeline(self, i: int) -> None:
+        """Run pipeline *i* on the cached raw frame and update its viewport."""
+        if self._raw_pts is None:
+            return
+        pts    = self._raw_pts
+        labels = self._raw_labels
+        current_id = self._refresh_id
+
+        if i < len(self._timing_labels):
+            self._timing_labels[i].text = f"{self._pipelines[i].name}: …"
+
+        def _run() -> None:
+            t0 = time.perf_counter()
+            p_pts, p_labels = self._pipelines[i].run(
+                pts.copy(),
+                labels.copy() if labels is not None else None,
+            )
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            gui.Application.instance.post_to_main_thread(
+                self._window,
+                lambda p=p_pts, l=p_labels, t=elapsed_ms:
+                    self._on_pipeline_done(current_id, i, p, l, t),
+            )
+
+        self._executor.submit(_run)
+
     def _on_class_toggle(self, cls_id: int, checked: bool) -> None:
         if checked:
             self.active_classes.add(cls_id)
@@ -485,7 +549,7 @@ class LidarViewer:
 
     def _recolor_all(self) -> None:
         for i, (pts, labels) in enumerate(zip(self._cached_pts, self._cached_labels)):
-            if pts is not None:
+            if pts is not None and self._pipeline_active[i]:
                 self._update_cloud(i, pts, labels)
 
     # Resolve key-down enum once, handling Open3D API differences across versions
@@ -534,11 +598,15 @@ class LidarViewer:
             if lbl_raw is not None:
                 labels = _to_numpy(lbl_raw).astype(np.int64)
 
+        self._raw_pts    = pts
+        self._raw_labels = labels
+
         self._lbl_frame.text = f"{self.current_idx + 1} / {len(self.dataset)}"
         self._lbl_npts.text  = f"Points: {len(pts):,}"
 
         for i, lbl in enumerate(self._timing_labels):
-            lbl.text = f"{self._pipelines[i].name}: …"
+            if self._pipeline_active[i]:
+                lbl.text = f"{self._pipelines[i].name}: …"
 
         # Bump ID so any in-flight callbacks from the previous frame are discarded
         self._refresh_id += 1
@@ -558,7 +626,13 @@ class LidarViewer:
             )
 
         for i in range(len(self._pipelines)):
-            self._executor.submit(_run, i)
+            if self._pipeline_active[i]:
+                self._executor.submit(_run, i)
+            else:
+                # Clear stale cache so the viewport re-renders when re-enabled
+                self._cached_pts[i]          = None
+                self._cached_labels[i]       = None
+                self._camera_initialized[i]  = False
 
     def _on_pipeline_done(
         self,

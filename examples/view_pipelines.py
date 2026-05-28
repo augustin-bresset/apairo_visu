@@ -13,6 +13,11 @@ Each pipeline is a list of callables with signature::
 
 Replace the stub models below with your actual inference calls.
 
+**Active pipeline toggles** — the left panel has an "Active pipelines" section with one
+checkbox per pipeline.  Uncheck a pipeline to hide its viewport and stop computing it;
+re-check to bring it back on the current frame.  This lets you focus on any subset of
+pipelines without restarting the script.
+
 Usage::
 
     python examples/view_pipelines.py --root /data/goose --split val

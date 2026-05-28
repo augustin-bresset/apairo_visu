@@ -136,6 +136,8 @@ def model_a(pts, labels):
 
 Pipelines run in **parallel** — each viewport updates as soon as its pipeline finishes.  Elapsed time per pipeline is shown in the left panel.
 
+Use the **Active pipelines** checkboxes in the panel to show or hide individual viewports at runtime.  Unchecking a pipeline stops computing it on subsequent frames; re-checking re-runs it on the current frame immediately.  This lets you focus on any subset without restarting the script.
+
 ### Compare preprocessing strategies + model
 
 ```python

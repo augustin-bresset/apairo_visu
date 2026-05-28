@@ -129,19 +129,42 @@ The selected mode is applied to **all viewports simultaneously**.
 │  COLOUR MODE [T] │                 │                 │                 │
 │  [Semantic ▼]    │                 │                 │                 │
 │                  │                 │                 │                 │
-│  PIPELINES       │                 │                 │                 │
-│  Raw: — ms       │                 │                 │                 │
-│  Preprocessed: — │                 │                 │                 │
-│  Model A: — ms   └─────────────────┴─────────────────┴─────────────────┘
-│  ...             
-│  CLASS DISTRIB.  
+│  ACTIVE PIPELINES│                 │                 │                 │
+│  ☑ Raw           │                 │                 │                 │
+│  ☑ Preprocessed  └─────────────────┴─────────────────┴─────────────────┘
+│  ☑ Model A
+│
+│  PIPELINES
+│  Raw: 0 ms
+│  Preprocessed: 4 ms
+│  Model A: 42 ms
+│
+│  CLASS DISTRIB.
 │  (from pipeline 0)
-│  FILTER CLASSES  
-│  (all viewports) 
+│  FILTER CLASSES
+│  (all viewports)
 └──────────────────
 ```
 
-The **Overlays** and **Filter classes** sections are only shown when the corresponding data is available (poses and labels, respectively).  The **Pipelines** timing section is only shown in multi-pipeline mode.
+The **Overlays** and **Filter classes** sections are only shown when the corresponding data is available (poses and labels, respectively).  The **Active pipelines**, **Pipelines** timing, and **Sync cam** button are only shown in multi-pipeline mode.
+
+---
+
+## Active pipeline toggles
+
+In multi-pipeline mode, the **Active pipelines** section shows one checkbox per pipeline.  Unchecking a pipeline:
+
+- immediately hides its viewport and redistributes the available width among the remaining active ones,
+- skips its computation on subsequent frame navigations (useful when inference is slow),
+- re-runs it on the current frame when re-checked (using the cached raw data — no dataset re-read).
+
+This lets you compare any subset of pipelines without restarting the script.
+
+```
+# Start with 4 pipelines, then uncheck "Model B" in the panel
+# → 3 viewports fill the screen, Model B stops computing
+# → Re-check "Model B" → it re-runs on the current frame and reappears
+```
 
 ---
 
