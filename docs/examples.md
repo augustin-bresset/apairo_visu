@@ -60,7 +60,7 @@ Any dataset that returns a `Sample` with a point cloud tensor works with `LidarV
 ```python
 import apairo_visu
 
-# Custom dataset: sample.data["cloud"] → (N, 4) float32, sample.data["sem"] → (N,) int64
+# Custom dataset: sample.data["cloud"] -> (N, 4) float32, sample.data["sem"] -> (N,) int64
 view_cfg = apairo_visu.ViewConfig(
     point_key="cloud",
     label_key="sem",
@@ -125,7 +125,7 @@ apairo_visu.LidarViewer.launch(ds, label_cfg=cfg, pipelines=[
 ])
 ```
 
-Each pipeline step is a callable `(pts, labels) → (pts, labels)`:
+Each pipeline step is a callable `(pts, labels) -> (pts, labels)`:
 
 ```python
 def model_a(pts, labels):
@@ -134,7 +134,7 @@ def model_a(pts, labels):
     return pts, pred
 ```
 
-Pipelines run in **parallel** — each viewport updates as soon as its pipeline finishes.  Elapsed time per pipeline is shown in the left panel.
+Pipelines run in **parallel** -- each viewport updates as soon as its pipeline finishes.  Elapsed time per pipeline is shown in the left panel.
 
 Use the **Active pipelines** checkboxes in the panel to show or hide individual viewports at runtime.  Unchecking a pipeline stops computing it on subsequent frames; re-checking re-runs it on the current frame immediately.  This lets you focus on any subset without restarting the script.
 

@@ -15,9 +15,9 @@ dataset = apairo.Goose3DDataset(
 label_cfg = apairo_visu.load_label_config("goose")
 
 # ---- (Optional) load poses -----------------------------------------------
-# poses is a list of 4×4 numpy arrays, one per frame.
+# poses is a list of 4x4 numpy arrays, one per frame.
 # If your dataset has no pose data, simply omit it.
-poses = None  # e.g. np.load("poses.npy")  → list(poses)
+poses = None  # e.g. np.load("poses.npy")  -> list(poses)
 
 # ---- Specify which keys to use (defaults match GOOSE / RELLIS / SemanticKITTI)
 view_cfg = apairo_visu.ViewConfig(

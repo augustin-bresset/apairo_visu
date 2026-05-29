@@ -7,7 +7,7 @@ A label config is a dict that maps class IDs to colours and names. It is used by
 ```yaml
 # Required
 color_map:
-  0:  [0, 0, 0]        # class id → [R, G, B]  (0–255)
+  0:  [0, 0, 0]        # class id -> [R, G, B]  (0–255)
   1:  '#ff0000'        # hex strings are also accepted
   23: [170, 170, 170]
 
@@ -23,7 +23,7 @@ traversable_map:
 ignore_index: 0        # class id to ignore in stats (e.g. unlabeled)
 ```
 
-Both `color_map` and `semantic_map` accept non-contiguous integer keys — useful for datasets like RELLIS-3D where class IDs jump (0, 1, 3, 4, 5, …).
+Both `color_map` and `semantic_map` accept non-contiguous integer keys -- useful for datasets like RELLIS-3D where class IDs jump (0, 1, 3, 4, 5, …).
 
 ## Loading a config
 
@@ -76,5 +76,5 @@ apairo_visu.LidarViewer.launch(ds, label_cfg=label_cfg)
 When `label_cfg=None`, the viewer auto-generates 32 distinct colours using matplotlib's `tab20` colormap. Class names are shown as their integer IDs. This is useful for exploring unlabeled or custom datasets.
 
 ```python
-apairo_visu.LidarViewer.launch(ds)   # no label_cfg → auto colors
+apairo_visu.LidarViewer.launch(ds)   # no label_cfg -> auto colors
 ```

@@ -42,7 +42,7 @@ def _load_dataset(name: str, root: str, split: str | None):
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="apairo_visu — LiDAR dataset viewer")
+    p = argparse.ArgumentParser(description="apairo_visu -- LiDAR dataset viewer")
     p.add_argument("--dataset", required=True, help="Dataset name (goose | rellis | semantic_kitti)")
     p.add_argument("--root", required=True, help="Path to dataset root directory")
     p.add_argument("--split", default=None, help="Dataset split (train | val | test)")

@@ -12,10 +12,11 @@ authors = [
 license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
-    "apairo",
     "numpy",
     "open3d",
     "PyYAML",
+
+    "apairo @ git+https://github.com/apairo-robotics/apairo.git",
 ]
 
 [project.optional-dependencies]

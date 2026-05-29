@@ -1,4 +1,4 @@
-"""apairo_visu — interactive 3-D LiDAR visualisation for apairo datasets."""
+"""apairo_visu -- interactive 3-D LiDAR visualisation for apairo datasets."""
 
 from pathlib import Path
 

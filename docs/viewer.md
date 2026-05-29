@@ -21,12 +21,12 @@ Creates the application and **blocks** until the window is closed.
 
 | Parameter | Description |
 |---|---|
-| `dataset` | Any apairo dataset — must support `dataset[idx]` returning a `Sample`. |
+| `dataset` | Any apairo dataset -- must support `dataset[idx]` returning a `Sample`. |
 | `view_cfg` | Which keys to read from each `Sample`. Defaults to `point_key="lidar"`, `label_key="labels"`. |
 | `label_cfg` | Dict with `color_map`, `semantic_map`, optional `traversable_map`. Use `load_label_config()` for built-in configs. |
-| `poses` | Optional list of 4×4 `np.ndarray` (T_world_sensor), one per frame. Enables the trajectory overlay (viewport 0 only). |
+| `poses` | Optional list of 4x4 `np.ndarray` (T_world_sensor), one per frame. Enables the trajectory overlay (viewport 0 only). |
 | `start_idx` | Frame index to display first. |
-| `pipelines` | List of `Pipeline` objects — one viewport per entry. Defaults to `[Pipeline("Raw", [])]`. |
+| `pipelines` | List of `Pipeline` objects -- one viewport per entry. Defaults to `[Pipeline("Raw", [])]`. |
 
 ---
 
@@ -68,7 +68,7 @@ One `Pipeline` = one viewport.  When multiple pipelines are provided, they run *
 ```python
 Pipeline("Raw")                                # display raw data
 Pipeline("Preprocessed", [my_preprocess])      # preprocessing only
-Pipeline("Model A", [preprocess, model_a])     # preprocess → inference
+Pipeline("Model A", [preprocess, model_a])     # preprocess -> inference
 ```
 
 ---
@@ -156,14 +156,14 @@ In multi-pipeline mode, the **Active pipelines** section shows one checkbox per 
 
 - immediately hides its viewport and redistributes the available width among the remaining active ones,
 - skips its computation on subsequent frame navigations (useful when inference is slow),
-- re-runs it on the current frame when re-checked (using the cached raw data — no dataset re-read).
+- re-runs it on the current frame when re-checked (using the cached raw data -- no dataset re-read).
 
 This lets you compare any subset of pipelines without restarting the script.
 
 ```
 # Start with 4 pipelines, then uncheck "Model B" in the panel
-# → 3 viewports fill the screen, Model B stops computing
-# → Re-check "Model B" → it re-runs on the current frame and reappears
+# -> 3 viewports fill the screen, Model B stops computing
+# -> Re-check "Model B" -> it re-runs on the current frame and reappears
 ```
 
 ---
@@ -172,8 +172,8 @@ This lets you compare any subset of pipelines without restarting the script.
 
 | Key | Action |
 |---|---|
-| `→` or `L` | Next frame |
-| `←` or `H` | Previous frame |
+| `->` or `L` | Next frame |
+| `<-` or `H` | Previous frame |
 | `T` | Cycle colour mode (all viewports) |
 | `B` | Bird's-eye (top-down) view (all viewports) |
 | `R` | Reset camera to bounding box (all viewports) |
@@ -184,8 +184,8 @@ This lets you compare any subset of pipelines without restarting the script.
 ## Trajectory overlay
 
 When `poses` is provided, the viewer draws in viewport 0:
-- **Blue line** — past trajectory (frames 0 to current)
-- **Orange line** — future trajectory (frames current to end)
+- **Blue line** -- past trajectory (frames 0 to current)
+- **Orange line** -- future trajectory (frames current to end)
 
 Both are rendered in the **current sensor frame**: all trajectory waypoints (world-frame origins from the pose matrices) are transformed into the coordinate system of the current LiDAR scan using `T_sensor_world = inv(poses[current_idx])`.
 

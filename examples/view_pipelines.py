@@ -13,7 +13,7 @@ Each pipeline is a list of callables with signature::
 
 Replace the stub models below with your actual inference calls.
 
-**Active pipeline toggles** — the left panel has an "Active pipelines" section with one
+**Active pipeline toggles** -- the left panel has an "Active pipelines" section with one
 checkbox per pipeline.  Uncheck a pipeline to hide its viewport and stop computing it;
 re-check to bring it back on the current frame.  This lets you focus on any subset of
 pipelines without restarting the script.
@@ -34,6 +34,7 @@ import numpy as np
 import apairo
 import apairo_visu
 from apairo_visu import Pipeline
+
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +68,7 @@ def preprocess(
     pts: np.ndarray,
     labels: np.ndarray | None,
 ) -> tuple[np.ndarray, np.ndarray | None]:
-    """Combination of range filter and height clip — typical LiDAR preprocessing."""
+    """Combination of range filter and height clip -- typical LiDAR preprocessing."""
     pts, labels = range_filter(pts, labels)
     pts, labels = height_clip(pts, labels)
     return pts, labels
@@ -154,8 +155,8 @@ def main() -> None:
     ds  = apairo.Goose3DDataset(args.root, keys=["lidar", "labels"], split=args.split)
     cfg = apairo_visu.load_label_config("goose")
 
-    print(f"Demo: {args.demo!r} — {len(DEMOS[args.demo])} viewports")
-    print("Navigation: ← → (or H / L)  |  T: colour mode  |  B: BEV  |  Sync cam: panel button")
+    print(f"Demo: {args.demo!r} -- {len(DEMOS[args.demo])} viewports")
+    print("Navigation: <- -> (or H / L)  |  T: colour mode  |  B: BEV  |  Sync cam: panel button")
 
     apairo_visu.LidarViewer.launch(
         ds,

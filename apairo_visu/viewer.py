@@ -1,6 +1,6 @@
-"""Interactive 3-D LiDAR viewer for apairo datasets — multi-pipeline edition.
+"""Interactive 3-D LiDAR viewer for apairo datasets -- multi-pipeline edition.
 
-Usage (single viewport, no transform — backward compatible):
+Usage (single viewport, no transform -- backward compatible):
     from apairo_visu import LidarViewer, ViewConfig, load_label_config
     cfg = load_label_config("goose")
     LidarViewer.launch(dataset, label_cfg=cfg)
@@ -23,7 +23,7 @@ Keyboard shortcuts:
     Left  / H   previous frame
     R           reset camera (all viewports)
     B           bird's-eye (top-down) view
-    T           cycle colour mode  (Semantic → Intensity → Height)
+    T           cycle colour mode  (Semantic -> Intensity -> Height)
     J           toggle trajectory overlay
 """
 
@@ -50,7 +50,7 @@ from .colors import (
 PANEL_W = 290
 POINT_SIZE = 2.5
 DISPLAY_MODES = ["Semantic", "Intensity", "Height"]
-BANNER_H = 22   # pixels — pipeline-name banner above each viewport
+BANNER_H = 22   # pixels -- pipeline-name banner above each viewport
 
 C_TRAJ_PAST   = [0.20, 0.60, 1.00]
 C_TRAJ_FUTURE = [1.00, 0.60, 0.10]
@@ -101,7 +101,7 @@ class Pipeline:
     One :class:`Pipeline` maps to one viewport in the viewer.  When multiple
     pipelines are given to :meth:`LidarViewer.launch`, they run concurrently on
     a shared thread pool and each viewport updates as soon as its pipeline
-    finishes — useful when inference is slow.
+    finishes -- useful when inference is slow.
 
     Attributes:
         name: Label shown in the viewport banner and in the timing panel.
@@ -111,7 +111,7 @@ class Pipeline:
 
         Pipeline("Raw")                                  # no transform
         Pipeline("Range filter", [range_filter])         # preprocessing only
-        Pipeline("Model A", [preprocess, model_a])       # preprocess → inference
+        Pipeline("Model A", [preprocess, model_a])       # preprocess -> inference
     """
 
     name: str
@@ -121,9 +121,30 @@ class Pipeline:
         self,
         pts: np.ndarray,
         labels: np.ndarray | None,
+        frame_idx: int = 0,
     ) -> tuple[np.ndarray, np.ndarray | None]:
+        import types
         for step in self.steps:
-            pts, labels = step(pts, labels)
+            if hasattr(step, "process") and hasattr(step, "input_keys"):
+                # apairo_preprocess FramePreprocessor — build a minimal Sample
+                # from pts / labels according to the processor's declared input_keys.
+                if hasattr(step, "_idx"):
+                    step._idx = frame_idx          # random-access for stateful procs
+                data = {}
+                for key in step.input_keys:
+                    if key == "lidar":
+                        data["lidar"] = pts
+                    elif key == "labels" and labels is not None:
+                        data["labels"] = labels
+                sample = types.SimpleNamespace(data=data)
+                result = step.process(sample)
+                if result is not None:
+                    labels = np.asarray(result, dtype=np.int64)
+            else:
+                try:
+                    pts, labels = step(pts, labels, frame_idx=frame_idx)
+                except TypeError:
+                    pts, labels = step(pts, labels)
         return pts, labels
 
 
@@ -155,7 +176,7 @@ class LidarViewer:
     """Interactive 3-D LiDAR viewer for any apairo AbstractDataset.
 
     Supports one or more named pipelines displayed side-by-side for comparison.
-    Each pipeline is a sequence of ``(pts, labels) → (pts, labels)`` callables
+    Each pipeline is a sequence of ``(pts, labels) -> (pts, labels)`` callables
     applied before rendering.  Pipelines run in parallel via a thread pool; each
     viewport updates as soon as its pipeline finishes.
 
@@ -166,10 +187,10 @@ class LidarViewer:
         label_cfg: Dict with ``color_map``, ``semantic_map``, and optionally
                    ``traversable_map``.  Use ``load_label_config(name)`` for
                    built-in configs.  Pass ``None`` to skip label colouring.
-        poses:     Optional list of 4×4 numpy pose matrices (T_world_sensor),
+        poses:     Optional list of 4x4 numpy pose matrices (T_world_sensor),
                    one per frame, for a trajectory overlay (viewport 0 only).
         start_idx: First frame to display.
-        pipelines: List of :class:`Pipeline` objects — one viewport per entry.
+        pipelines: List of :class:`Pipeline` objects -- one viewport per entry.
                    Defaults to ``[Pipeline("Raw", [])]`` (current frame, no transform).
     """
 
@@ -178,6 +199,7 @@ class LidarViewer:
         dataset,
         view_cfg: ViewConfig | None = None,
         label_cfg: dict | None = None,
+        label_cfgs: list[dict | None] | None = None,
         poses: list[np.ndarray] | None = None,
         start_idx: int = 0,
         pipelines: list[Pipeline] | None = None,
@@ -188,28 +210,44 @@ class LidarViewer:
         self._poses      = poses
         self._pipelines  = pipelines if pipelines is not None else [Pipeline("Raw", [])]
 
-        # Colour / label setup
-        if label_cfg is not None:
-            self.color_map   = normalize_color_map(label_cfg["color_map"])
-            self.semantic_map = {
-                int(k): v for k, v in label_cfg.get("semantic_map", {}).items()
-            }
+        # Per-pipeline label setup
+        # label_cfgs overrides label_cfg per pipeline; missing entries fall back to label_cfg.
+        n_pipe = len(self._pipelines)
+        if label_cfgs is None:
+            resolved_cfgs: list[dict | None] = [label_cfg] * n_pipe
         else:
-            n = 32
-            self.color_map    = auto_color_map(n)
-            self.semantic_map = {i: str(i) for i in range(n)}
+            resolved_cfgs = list(label_cfgs)
+            while len(resolved_cfgs) < n_pipe:
+                resolved_cfgs.append(label_cfg)
 
-        self._trav_ids: set[int] = set()
-        if label_cfg:
-            self._trav_ids = {int(i) for i in label_cfg.get("traversable_map", [])}
+        self._color_maps:          list[dict]          = []
+        self._semantic_maps:       list[dict[int, str]] = []
+        self._active_classes_list: list[set[int]]      = []
+        self._class_ids_list:      list[list[int]]     = []
+        self._label_fixed:         list[bool]          = []
 
-        self._class_ids        = sorted(self.semantic_map.keys())
-        self.active_classes: set[int] = set(self._class_ids)
-        self._has_labels       = self.cfg.label_key is not None
-        self._display_mode: int = 0 if self._has_labels else 2
+        for cfg in resolved_cfgs:
+            if cfg is not None:
+                cmap = normalize_color_map(cfg["color_map"])
+                smap = {int(k): v for k, v in cfg.get("semantic_map", {}).items()}
+                cids = sorted(smap.keys())
+                fixed = True
+            else:
+                cmap  = {}
+                smap  = {}
+                cids  = []
+                fixed = False
+            self._color_maps.append(cmap)
+            self._semantic_maps.append(smap)
+            self._active_classes_list.append(set(cids))
+            self._class_ids_list.append(cids)
+            self._label_fixed.append(fixed)
+
+        self._has_labels    = self.cfg.label_key is not None
+        self._display_mode: int = 0 if (self._has_labels and self._label_fixed[0]) else 2
 
         # Per-viewport state (one entry per pipeline)
-        n = len(self._pipelines)
+        n = n_pipe
         self._scenes:            list[gui.SceneWidget]        = []
         self._banner_labels:     list[gui.Label]              = []
         self._mats:              list[rendering.MaterialRecord] = []
@@ -218,7 +256,7 @@ class LidarViewer:
         self._camera_initialized: list[bool]                  = [False] * n
         self._pipeline_active:   list[bool]                   = [True]  * n
 
-        # Raw frame cache — shared across all pipelines, refreshed on navigation
+        # Raw frame cache -- shared across all pipelines, refreshed on navigation
         self._raw_pts:    np.ndarray | None = None
         self._raw_labels: np.ndarray | None = None
 
@@ -231,13 +269,20 @@ class LidarViewer:
         self._panel:               gui.Vert   | None       = None
         self._lbl_frame:           gui.Label  | None       = None
         self._lbl_npts:            gui.Label  | None       = None
-        self._lbl_stats:           gui.Label  | None       = None
+        self._lbl_stats_list:      list[gui.Label | None]  = []
+        self._slider_frame:        gui.Slider | None       = None
         self._timing_labels:       list[gui.Label]         = []
         self._pipeline_checkboxes: list[gui.Checkbox]      = []
         self._checkboxes:          dict[int, gui.Checkbox] = {}
+        self._checkbox_swatches:   dict[int, gui.ImageWidget] = {}
+        self._filter_pipe_idx:     int                     = 0
+        self._filter_combo:        gui.Combobox | None     = None
         self._mode_combo:          gui.Combobox | None     = None
         self._cb_traj:             gui.Checkbox | None     = None
         self._show_traj:           bool                    = False
+        self._hover_label:         gui.Label  | None       = None
+        self._last_hover_pos:      tuple[int, int]         = (-1, -1)
+        self._last_hover_time:     float                   = 0.0
 
     # ------------------------------------------------------------------
     # Public API
@@ -248,6 +293,7 @@ class LidarViewer:
         dataset,
         view_cfg: ViewConfig | None = None,
         label_cfg: dict | None = None,
+        label_cfgs: list[dict | None] | None = None,
         poses: list[np.ndarray] | None = None,
         start_idx: int = 0,
         pipelines: list[Pipeline] | None = None,
@@ -255,24 +301,24 @@ class LidarViewer:
         """Create the GUI application and block until the window is closed.
 
         Args:
-            dataset:   Any apairo dataset — must support ``dataset[idx]``
+            dataset:   Any apairo dataset -- must support ``dataset[idx]``
                        returning a ``Sample`` with a ``data`` dict.
             view_cfg:  Which keys to read from each ``Sample``.  Defaults to
                        ``point_key="lidar"`` and ``label_key="labels"``.
             label_cfg: Dict with ``color_map``, ``semantic_map``, and optionally
                        ``traversable_map``.  Use :func:`load_label_config` for
                        built-in configs.  Pass ``None`` to skip label colouring.
-            poses:     Optional list of 4×4 ``np.ndarray`` (T_world_sensor), one
+            poses:     Optional list of 4x4 ``np.ndarray`` (T_world_sensor), one
                        per frame.  Enables the trajectory overlay in viewport 0.
             start_idx: Frame index to display first.
-            pipelines: List of :class:`Pipeline` objects — one viewport per entry.
+            pipelines: List of :class:`Pipeline` objects -- one viewport per entry.
                        Pipelines run in parallel; each viewport updates as soon as
                        its pipeline finishes.  Defaults to
                        ``[Pipeline("Raw", [])]``.
         """
         app = gui.Application.instance
         app.initialize()
-        viewer = LidarViewer(dataset, view_cfg, label_cfg, poses, start_idx, pipelines)
+        viewer = LidarViewer(dataset, view_cfg, label_cfg, label_cfgs, poses, start_idx, pipelines)
         viewer._build_window()
         app.run()
 
@@ -282,7 +328,7 @@ class LidarViewer:
 
     def _build_window(self) -> None:
         app = gui.Application.instance
-        w   = app.create_window("apairo — LiDAR Viewer", 1500, 900)
+        w   = app.create_window("apairo -- LiDAR Viewer", 1500, 900)
         self._window = w
         em = w.theme.font_size
 
@@ -314,13 +360,20 @@ class LidarViewer:
         # Navigation
         panel.add_child(self._section_label("Navigation", em))
 
-        self._lbl_frame = gui.Label("— / —")
+        self._lbl_frame = gui.Label("-- / --")
         self._lbl_frame.text_color = gui.Color(0.85, 0.85, 0.85)
         panel.add_child(self._lbl_frame)
 
-        self._lbl_npts = gui.Label("Points: —")
+        self._lbl_npts = gui.Label("Points: --")
         self._lbl_npts.text_color = gui.Color(0.6, 0.6, 0.6)
         panel.add_child(self._lbl_npts)
+
+        slider = gui.Slider(gui.Slider.INT)
+        slider.set_limits(0, len(self.dataset) - 1)
+        slider.int_value = self.current_idx
+        slider.set_on_value_changed(self._on_slider_changed)
+        self._slider_frame = slider
+        panel.add_child(slider)
 
         nav_row = gui.Horiz(int(0.3 * em))
         btn_prev = gui.Button("< Prev"); btn_prev.set_on_clicked(self._on_prev)
@@ -367,7 +420,7 @@ class LidarViewer:
             panel.add_child(cb_traj)
             panel.add_child(gui.Label(""))
 
-        # Active pipeline toggles — check/uncheck to show/hide individual viewports
+        # Active pipeline toggles -- check/uncheck to show/hide individual viewports
         if multi:
             panel.add_child(self._section_label("Active pipelines", em))
             for i, pipeline in enumerate(self._pipelines):
@@ -380,57 +433,95 @@ class LidarViewer:
                 panel.add_child(cb)
             panel.add_child(gui.Label(""))
 
-        # Per-pipeline timing (only in multi-pipeline mode)
-        if multi:
-            panel.add_child(self._section_label("Pipelines", em))
-            for pipeline in self._pipelines:
-                lbl = gui.Label(f"{pipeline.name}: —")
-                lbl.text_color = gui.Color(0.7, 0.7, 0.7)
-                self._timing_labels.append(lbl)
-                panel.add_child(lbl)
-            panel.add_child(gui.Label(""))
+        # Pipelines section: timing + per-pipeline class distribution
+        panel.add_child(self._section_label("Pipelines", em))
+        for i, pipeline in enumerate(self._pipelines):
+            timing_lbl = gui.Label(f"{pipeline.name}: --")
+            timing_lbl.text_color = gui.Color(0.7, 0.7, 0.7)
+            self._timing_labels.append(timing_lbl)
+            panel.add_child(timing_lbl)
 
-        # Class distribution (from pipeline 0)
+            if self._has_labels:
+                stats_lbl = gui.Label("")
+                stats_lbl.text_color = gui.Color(0.65, 0.65, 0.65)
+                self._lbl_stats_list.append(stats_lbl)
+                panel.add_child(stats_lbl)
+            else:
+                self._lbl_stats_list.append(None)
+
+        panel.add_child(gui.Label(""))
+
+        # Class filter — one filter section, pipeline selector if multiple configs differ
         if self._has_labels:
-            panel.add_child(self._section_label("Class distribution", em))
-            self._lbl_stats = gui.Label("—")
-            self._lbl_stats.text_color = gui.Color(0.75, 0.75, 0.75)
-            panel.add_child(self._lbl_stats)
-            panel.add_child(gui.Label(""))
+            # Collect class IDs for all fixed-config pipelines (union)
+            fixed_indices = [i for i, f in enumerate(self._label_fixed) if f]
+            all_class_ids: list[int] = sorted({
+                cid
+                for i in fixed_indices
+                for cid in self._class_ids_list[i]
+            })
 
-            # Class filter (applied globally to all viewports)
-            panel.add_child(self._section_label("Filter classes", em))
+            if all_class_ids:
+                panel.add_child(self._section_label("Filter classes", em))
 
-            toggle_row = gui.Horiz(int(0.3 * em))
-            btn_show = gui.Button("Show all"); btn_show.set_on_clicked(self._on_show_all)
-            btn_hide = gui.Button("Hide all"); btn_hide.set_on_clicked(self._on_hide_all)
-            toggle_row.add_child(btn_show); toggle_row.add_child(btn_hide)
-            panel.add_child(toggle_row)
+                # Pipeline selector (only when configs differ across pipelines)
+                if multi and len(fixed_indices) > 1:
+                    filter_row = gui.Horiz(int(0.3 * em))
+                    filter_row.add_child(gui.Label("Pipeline:"))
+                    fc = gui.Combobox()
+                    for i in fixed_indices:
+                        fc.add_item(self._pipelines[i].name)
+                    fc.selected_index = 0
+                    fc.set_on_selection_changed(self._on_filter_pipe_changed)
+                    self._filter_combo = fc
+                    self._filter_pipe_idx = fixed_indices[0]
+                    filter_row.add_child(fc)
+                    panel.add_child(filter_row)
+                elif fixed_indices:
+                    self._filter_pipe_idx = fixed_indices[0]
 
-            scroll = gui.ScrollableVert(
-                int(0.3 * em), gui.Margins(0, 0, int(0.3 * em), 0)
-            )
-            for cls_id in self._class_ids:
-                name = self.semantic_map.get(cls_id, str(cls_id))
-                rgb  = self.color_map.get(cls_id, [128, 128, 128])
-                tile = np.full((14, 14, 3), rgb, dtype=np.uint8)
+                toggle_row = gui.Horiz(int(0.3 * em))
+                btn_show = gui.Button("Show all"); btn_show.set_on_clicked(self._on_show_all)
+                btn_hide = gui.Button("Hide all"); btn_hide.set_on_clicked(self._on_hide_all)
+                toggle_row.add_child(btn_show); toggle_row.add_child(btn_hide)
+                panel.add_child(toggle_row)
 
-                cb = gui.Checkbox(f"{cls_id}: {name}")
-                cb.checked = True
-                cb.set_on_checked(
-                    lambda checked, cid=cls_id: self._on_class_toggle(cid, checked)
+                scroll = gui.ScrollableVert(
+                    int(0.3 * em), gui.Margins(0, 0, int(0.3 * em), 0)
                 )
-                self._checkboxes[cls_id] = cb
+                p0 = self._filter_pipe_idx
+                for cls_id in all_class_ids:
+                    name = self._semantic_maps[p0].get(cls_id, str(cls_id))
+                    rgb  = self._color_maps[p0].get(cls_id, [128, 128, 128])
+                    tile = np.full((14, 14, 3), rgb, dtype=np.uint8)
 
-                row = gui.Horiz(int(0.2 * em))
-                row.add_child(gui.ImageWidget(o3d.geometry.Image(tile)))
-                row.add_child(cb)
-                scroll.add_child(row)
+                    cb = gui.Checkbox(f"{cls_id}: {name}")
+                    cb.checked = cls_id in self._active_classes_list[p0]
+                    cb.set_on_checked(
+                        lambda checked, cid=cls_id: self._on_class_toggle(cid, checked)
+                    )
+                    self._checkboxes[cls_id] = cb
 
-            panel.add_child(scroll)
+                    img = gui.ImageWidget(o3d.geometry.Image(tile))
+                    self._checkbox_swatches[cls_id] = img
+
+                    row = gui.Horiz(int(0.2 * em))
+                    row.add_child(img)
+                    row.add_child(cb)
+                    scroll.add_child(row)
+
+                panel.add_child(scroll)
 
         w.add_child(panel)
         self._panel = panel
+
+        # Hover info overlay (added last so it renders on top of the scene)
+        hover_lbl = gui.Label("--")
+        hover_lbl.text_color = gui.Color(1.0, 1.0, 0.5)
+        self._hover_label = hover_lbl
+        w.add_child(hover_lbl)
+        self._scenes[0].set_on_mouse(self._on_mouse)
+
         w.set_on_layout(self._on_layout)
 
         self._refresh()
@@ -451,7 +542,7 @@ class LidarViewer:
         lh         = BANNER_H if multi else 0
 
         # Distribute width only among active viewports; inactive ones are pushed
-        # off-screen with a 1×1 frame to avoid a zero-size render target.
+        # off-screen with a 1x1 frame to avoid a zero-size render target.
         active = [i for i in range(n) if self._pipeline_active[i]]
         vp_w   = vp_total_w / len(active) if active else vp_total_w
         off_x  = r.x + r.width + 10  # off-screen position for hidden viewports
@@ -469,6 +560,13 @@ class LidarViewer:
                 scene.frame = gui.Rect(x, r.y + lh, vp_w, r.height - lh)
                 slot += 1
 
+        if self._hover_label is not None:
+            ol_w, ol_h = 175, 115
+            vp0_right = r.x + PANEL_W + (vp_w if 0 in active else vp_total_w)
+            self._hover_label.frame = gui.Rect(
+                vp0_right - ol_w - 8, r.y + lh + 8, ol_w, ol_h
+            )
+
     # ------------------------------------------------------------------
     # Navigation event handlers
     # ------------------------------------------------------------------
@@ -480,6 +578,111 @@ class LidarViewer:
     def _on_prev(self) -> None:
         self.current_idx = (self.current_idx - 1) % len(self.dataset)
         self._refresh()
+
+    def _on_slider_changed(self, value: float) -> None:
+        new_idx = int(value)
+        if new_idx != self.current_idx:
+            self.current_idx = new_idx
+            self._refresh()
+
+    def _on_mouse(self, event) -> int:
+        if event.type == gui.MouseEvent.Type.MOVE:
+            now = time.perf_counter()
+            if now - self._last_hover_time > 0.05:
+                self._last_hover_time = now
+                self._last_hover_pos = (event.x, event.y)
+                self._update_hover_info(event.x, event.y)
+        return gui.Widget.EventCallbackResult.IGNORED
+
+    def _find_hover_point(self, lx: int, ly: int) -> int | None:
+        """Return the index of the point nearest to viewport-local (lx, ly).
+
+        Projects all cached points to screen space via the camera's view and
+        projection matrices, then returns the nearest point within a 15-pixel
+        screen-space radius.
+        """
+        pts = self._cached_pts[0]
+        if pts is None or len(pts) == 0:
+            return None
+        try:
+            frame = self._scenes[0].frame
+            W, H = frame.width, frame.height
+            if W <= 0 or H <= 0 or not (0 <= lx < W and 0 <= ly < H):
+                return None
+
+            cam  = self._scenes[0].scene.camera
+            view = np.asarray(cam.get_view_matrix())         # world -> camera
+            proj = np.asarray(cam.get_projection_matrix())   # camera -> clip
+            VP   = proj @ view
+
+            xyz  = pts[:, :3].astype(np.float64)
+            N    = len(xyz)
+            xyz1 = np.hstack([xyz, np.ones((N, 1))])         # (N, 4)
+            clip = (VP @ xyz1.T).T                           # (N, 4)
+
+            w        = clip[:, 3]
+            in_front = w > 0
+            if not in_front.any():
+                return None
+
+            w_safe = np.where(in_front, w, 1.0)
+            ndc_x  = clip[:, 0] / w_safe
+            ndc_y  = clip[:, 1] / w_safe
+
+            # NDC -> viewport pixels  (NDC y=+1 -> top -> screen y=0)
+            sx = (ndc_x + 1.0) * 0.5 * W
+            sy = (1.0 - ndc_y) * 0.5 * H
+
+            dist2 = (sx - lx) ** 2 + (sy - ly) ** 2
+            dist2[~in_front] = np.inf
+            dist2[(ndc_x < -1) | (ndc_x > 1) | (ndc_y < -1) | (ndc_y > 1)] = np.inf
+
+            idx = int(np.argmin(dist2))
+            return idx if dist2[idx] <= 15 ** 2 else None
+
+        except Exception:
+            return None
+
+    def _update_hover_info(self, cx: int, cy: int) -> None:
+        if self._hover_label is None:
+            return
+
+        frame = self._scenes[0].frame
+        # cx, cy are window-local; convert to viewport-local
+        lx = cx - frame.x
+        ly = cy - frame.y
+
+        if not (0 <= lx < frame.width and 0 <= ly < frame.height):
+            self._hover_label.text = "--"
+            self._window.post_redraw()
+            return
+
+        idx = self._find_hover_point(lx, ly)
+        if idx is None:
+            self._hover_label.text = "--"
+            self._window.post_redraw()
+            return
+
+        pts    = self._cached_pts[0]
+        labels = self._cached_labels[0]
+        x, y, z = float(pts[idx, 0]), float(pts[idx, 1]), float(pts[idx, 2])
+        dist = float(np.sqrt(x * x + y * y + z * z))
+
+        lines = [
+            f" x   {x:+.2f} m",
+            f" y   {y:+.2f} m",
+            f" z   {z:+.2f} m",
+            f" d   {dist:.2f} m",
+        ]
+        if labels is not None:
+            cls_id = int(labels[idx])
+            name   = self._semantic_maps[0].get(cls_id, str(cls_id))
+            lines.append(f" [{cls_id}: {name}]")
+        if pts.shape[1] > self.cfg.intensity_channel:
+            lines.append(f" i   {float(pts[idx, self.cfg.intensity_channel]):.3f}")
+
+        self._hover_label.text = "\n".join(lines)
+        self._window.post_redraw()
 
     def _on_mode_changed(self, _text: str, idx: int) -> None:
         self._display_mode = idx
@@ -509,6 +712,7 @@ class LidarViewer:
         pts    = self._raw_pts
         labels = self._raw_labels
         current_id = self._refresh_id
+        frame_idx  = self.current_idx
 
         if i < len(self._timing_labels):
             self._timing_labels[i].text = f"{self._pipelines[i].name}: …"
@@ -518,6 +722,7 @@ class LidarViewer:
             p_pts, p_labels = self._pipelines[i].run(
                 pts.copy(),
                 labels.copy() if labels is not None else None,
+                frame_idx=frame_idx,
             )
             elapsed_ms = (time.perf_counter() - t0) * 1000
             gui.Application.instance.post_to_main_thread(
@@ -529,23 +734,46 @@ class LidarViewer:
         self._executor.submit(_run)
 
     def _on_class_toggle(self, cls_id: int, checked: bool) -> None:
+        p = self._filter_pipe_idx
         if checked:
-            self.active_classes.add(cls_id)
+            self._active_classes_list[p].add(cls_id)
         else:
-            self.active_classes.discard(cls_id)
-        self._recolor_all()
+            self._active_classes_list[p].discard(cls_id)
+        pts, labels = self._cached_pts[p], self._cached_labels[p]
+        if pts is not None and self._pipeline_active[p]:
+            self._update_cloud(p, pts, labels)
 
     def _on_show_all(self) -> None:
-        self.active_classes = set(self._class_ids)
-        for cb in self._checkboxes.values():
-            cb.checked = True
-        self._recolor_all()
+        p = self._filter_pipe_idx
+        self._active_classes_list[p] = set(self._class_ids_list[p])
+        for cls_id, cb in self._checkboxes.items():
+            cb.checked = cls_id in self._active_classes_list[p]
+        pts, labels = self._cached_pts[p], self._cached_labels[p]
+        if pts is not None and self._pipeline_active[p]:
+            self._update_cloud(p, pts, labels)
 
     def _on_hide_all(self) -> None:
-        self.active_classes = set()
+        p = self._filter_pipe_idx
+        self._active_classes_list[p] = set()
         for cb in self._checkboxes.values():
             cb.checked = False
-        self._recolor_all()
+        pts, labels = self._cached_pts[p], self._cached_labels[p]
+        if pts is not None and self._pipeline_active[p]:
+            self._update_cloud(p, pts, labels)
+
+    def _on_filter_pipe_changed(self, _text: str, combo_idx: int) -> None:
+        fixed_indices = [i for i, f in enumerate(self._label_fixed) if f]
+        if combo_idx >= len(fixed_indices):
+            return
+        p = fixed_indices[combo_idx]
+        self._filter_pipe_idx = p
+        active = self._active_classes_list[p]
+        for cls_id, cb in self._checkboxes.items():
+            cb.checked = cls_id in active
+        for cls_id, img in self._checkbox_swatches.items():
+            rgb  = self._color_maps[p].get(cls_id, [128, 128, 128])
+            tile = np.full((14, 14, 3), rgb, dtype=np.uint8)
+            img.update_image(o3d.geometry.Image(tile))
 
     def _recolor_all(self) -> None:
         for i, (pts, labels) in enumerate(zip(self._cached_pts, self._cached_labels)):
@@ -603,6 +831,8 @@ class LidarViewer:
 
         self._lbl_frame.text = f"{self.current_idx + 1} / {len(self.dataset)}"
         self._lbl_npts.text  = f"Points: {len(pts):,}"
+        if self._slider_frame is not None:
+            self._slider_frame.int_value = self.current_idx
 
         for i, lbl in enumerate(self._timing_labels):
             if self._pipeline_active[i]:
@@ -611,12 +841,14 @@ class LidarViewer:
         # Bump ID so any in-flight callbacks from the previous frame are discarded
         self._refresh_id += 1
         current_id = self._refresh_id
+        frame_idx  = self.current_idx
 
         def _run(i: int) -> None:
             t0 = time.perf_counter()
             p_pts, p_labels = self._pipelines[i].run(
                 pts.copy(),
                 labels.copy() if labels is not None else None,
+                frame_idx=frame_idx,
             )
             elapsed_ms = (time.perf_counter() - t0) * 1000
             gui.Application.instance.post_to_main_thread(
@@ -648,8 +880,12 @@ class LidarViewer:
         self._cached_pts[i]    = pts
         self._cached_labels[i] = labels
 
-        if i == 0 and labels is not None and self._lbl_stats is not None:
-            self._lbl_stats.text = self._build_stats_text(labels)
+        if labels is not None and not self._label_fixed[i]:
+            self._auto_detect_labels(i, labels)
+
+        lbl_stats = self._lbl_stats_list[i] if i < len(self._lbl_stats_list) else None
+        if labels is not None and lbl_stats is not None:
+            lbl_stats.text = self._build_stats_text(i, labels)
 
         if i < len(self._timing_labels):
             self._timing_labels[i].text = f"{self._pipelines[i].name}: {elapsed_ms:.0f} ms"
@@ -673,13 +909,13 @@ class LidarViewer:
         mask = np.ones(len(xyz), dtype=bool)
 
         if self._display_mode == 0 and labels is not None:
-            mask = np.isin(labels, list(self.active_classes))
+            mask = np.isin(labels, list(self._active_classes_list[i]))
 
         xyz_f = xyz[mask].astype(np.float64)
         if len(xyz_f) == 0:
             return
 
-        colors = self._compute_colors(pts[mask], labels[mask] if labels is not None else None)
+        colors = self._compute_colors(i, pts[mask], labels[mask] if labels is not None else None)
 
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(xyz_f)
@@ -690,11 +926,11 @@ class LidarViewer:
             self._setup_camera(i)
             self._camera_initialized[i] = True
 
-    def _compute_colors(self, pts: np.ndarray, labels: np.ndarray | None) -> np.ndarray:
+    def _compute_colors(self, i: int, pts: np.ndarray, labels: np.ndarray | None) -> np.ndarray:
         mode = self._display_mode
 
-        if mode == 0 and labels is not None:
-            return labels_to_colors(labels, self.color_map)
+        if mode == 0 and labels is not None and self._color_maps[i]:
+            return labels_to_colors(labels, self._color_maps[i])
 
         if mode == 1 and pts.shape[1] > self.cfg.intensity_channel:
             return intensity_colors(pts[:, self.cfg.intensity_channel])
@@ -720,10 +956,13 @@ class LidarViewer:
         mat_line.shader     = "unlitLine"
         mat_line.line_width = 2.0
 
+        def _has_extent(pts: np.ndarray) -> bool:
+            return bool((pts.max(axis=0) - pts.min(axis=0)).sum() > 1e-6)
+
         if self.current_idx > 0:
             past_pts = _world_to_local(self._poses[: self.current_idx + 1])
             edges    = [[j, j + 1] for j in range(len(past_pts) - 1)]
-            if edges:
+            if edges and _has_extent(past_pts):
                 scene.add_geometry(
                     "traj_past", _make_lineset(past_pts, edges, C_TRAJ_PAST), mat_line
                 )
@@ -731,7 +970,7 @@ class LidarViewer:
         if self.current_idx < len(self._poses) - 1:
             future_pts = _world_to_local(self._poses[self.current_idx:])
             edges      = [[j, j + 1] for j in range(len(future_pts) - 1)]
-            if edges:
+            if edges and _has_extent(future_pts):
                 scene.add_geometry(
                     "traj_future", _make_lineset(future_pts, edges, C_TRAJ_FUTURE), mat_line
                 )
@@ -782,14 +1021,27 @@ class LidarViewer:
     # Stats
     # ------------------------------------------------------------------
 
-    def _build_stats_text(self, labels: np.ndarray) -> str:
+    def _build_stats_text(self, i: int, labels: np.ndarray) -> str:
         total  = max(len(labels), 1)
         unique, counts = np.unique(labels, return_counts=True)
         order  = np.argsort(-counts)
+        smap   = self._semantic_maps[i]
         lines  = []
         for cls_id, cnt in zip(unique[order][:12], counts[order][:12]):
-            name = self.semantic_map.get(int(cls_id), str(cls_id))
+            name = smap.get(int(cls_id), str(cls_id))
             pct  = 100.0 * cnt / total
             bar  = "█" * int(pct / 5)
             lines.append(f"{name[:14]:<14} {pct:5.1f}% {bar}")
         return "\n".join(lines)
+
+    def _auto_detect_labels(self, i: int, labels: np.ndarray) -> None:
+        """Build or refresh color map for pipeline i from the observed label IDs."""
+        unique_ids = sorted(int(v) for v in np.unique(labels))
+        if unique_ids == self._class_ids_list[i]:
+            return  # nothing changed
+        n = len(unique_ids)
+        cmap = auto_color_map(n)
+        self._color_maps[i]          = {uid: cmap[j] for j, uid in enumerate(unique_ids)}
+        self._semantic_maps[i]       = {uid: str(uid) for uid in unique_ids}
+        self._class_ids_list[i]      = unique_ids
+        self._active_classes_list[i] = set(unique_ids)

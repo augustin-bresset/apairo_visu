@@ -33,7 +33,7 @@ apairo_visu.LidarViewer.launch(ds, label_cfg=cfg)
 ## Pipeline comparison
 
 Compare preprocessing strategies or model predictions side-by-side.  
-Each `Pipeline` is a named sequence of `(pts, labels) → (pts, labels)` callables.
+Each `Pipeline` is a named sequence of `(pts, labels) -> (pts, labels)` callables.
 
 ```python
 from apairo_visu import Pipeline
@@ -45,7 +45,7 @@ apairo_visu.LidarViewer.launch(ds, label_cfg=cfg, pipelines=[
 ])
 ```
 
-Pipelines run in parallel — each viewport updates as soon as its pipeline finishes.  
+Pipelines run in parallel -- each viewport updates as soon as its pipeline finishes.  
 See [`examples/view_pipelines.py`](examples/view_pipelines.py) for a full runnable example.
 
 ## CLI
@@ -60,9 +60,9 @@ python -m apairo_visu --dataset semantic_kitti --root /data/kitti --split train 
 
 | Key | Action |
 |-----|--------|
-| `→` / `L` | Next frame |
-| `←` / `H` | Previous frame |
-| `T` | Cycle colour mode (Semantic → Intensity → Height) |
+| `->` / `L` | Next frame |
+| `<-` / `H` | Previous frame |
+| `T` | Cycle colour mode (Semantic -> Intensity -> Height) |
 | `B` | Bird's-eye (top-down) view |
 | `R` | Reset camera (all viewports) |
 | `J` | Toggle trajectory overlay |

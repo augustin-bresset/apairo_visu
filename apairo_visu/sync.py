@@ -30,8 +30,8 @@ class NearestSyncDataset:
         ds_raw = TartanKittiDataset(seq_dir, keys=["velodyne_0", "super_odom"])
         ds = NearestSyncDataset(ds_raw, reference_key="velodyne_0")
         sample = ds[0]
-        # sample.data["velodyne_0"]  → tensor (N, 3)
-        # sample.data["super_odom"] → tensor (7,)  nearest-matched
+        # sample.data["velodyne_0"]  -> tensor (N, 3)
+        # sample.data["super_odom"] -> tensor (7,)  nearest-matched
     """
 
     def __init__(self, dataset, reference_key: str) -> None:
@@ -45,7 +45,7 @@ class NearestSyncDataset:
         ref_ts = dataset.timestamps[reference_key]   # (N,)
         self._ref_ts = ref_ts
 
-        # For each key, build a (N,) array mapping reference frame i → loader index
+        # For each key, build a (N,) array mapping reference frame i -> loader index
         self._frame_idx: dict[str, np.ndarray] = {}
         for key in dataset.keys:
             ts = dataset.timestamps[key]             # (M,)

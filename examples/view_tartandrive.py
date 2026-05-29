@@ -18,7 +18,7 @@ import apairo
 import apairo_visu
 
 # ---------------------------------------------------------------------------
-# Default path — adjust if your data lives elsewhere
+# Default path -- adjust if your data lives elsewhere
 # ---------------------------------------------------------------------------
 _DEFAULT_SEQ = (
     Path.home()
@@ -96,15 +96,15 @@ def main() -> None:
             print(f"  [WARN] Could not load poses: {e}")
 
     # --- Viewer config ---
-    # TartanDrive velodyne scans are (N, 3) XYZ — no labels, no intensity column.
+    # TartanDrive velodyne scans are (N, 3) XYZ -- no labels, no intensity column.
     # Defaults to Height (viridis on Z) which works well out of the box.
     view_cfg = apairo_visu.ViewConfig(
         point_key=lidar_key,
         label_key=None,
-        intensity_channel=3,   # not present in (N,3) data → falls back to Height
+        intensity_channel=3,   # not present in (N,3) data -> falls back to Height
     )
 
-    print("Launching viewer … (← → or H/L to navigate, B for BEV, J for trajectory)")
+    print("Launching viewer … (<- -> or H/L to navigate, B for BEV, J for trajectory)")
     apairo_visu.LidarViewer.launch(
         ds,
         view_cfg=view_cfg,

@@ -27,7 +27,7 @@ The built-in datasets that work out of the box are:
 | `Goose3DDataset` | `"lidar"` | `"labels"` | `"goose"` |
 | `Rellis3DDataset` | `"lidar"` | `"labels"` | `"rellis"` |
 | `SemanticKittiDataset` | `"lidar"` | `"labels"` | `"semantic_kitti"` |
-| `TartanKittiDataset` | `"velodyne_0"` | — | — |
+| `TartanKittiDataset` | `"velodyne_0"` | -- | -- |
 
 ### ViewConfig
 
@@ -36,7 +36,7 @@ The built-in datasets that work out of the box are:
 ```python
 view_cfg = apairo_visu.ViewConfig(
     point_key="lidar",       # key for the point cloud tensor (float32, shape [N, C])
-    label_key="labels",      # key for per-point labels (int64, shape [N]) — or None
+    label_key="labels",      # key for per-point labels (int64, shape [N]) -- or None
     intensity_channel=3,     # column index for intensity in the point cloud
 )
 ```
@@ -49,8 +49,8 @@ A label config is a plain dict (usually loaded from YAML) that describes how to 
 
 ```python
 label_cfg = {
-    "color_map":    {0: [0, 0, 0], 23: "#ff2f80", ...},   # class id → RGB
-    "semantic_map": {0: "unlabeled", 23: "asphalt", ...},  # class id → name
+    "color_map":    {0: [0, 0, 0], 23: "#ff2f80", ...},   # class id -> RGB
+    "semantic_map": {0: "unlabeled", 23: "asphalt", ...},  # class id -> name
     "traversable_map": [23, 31, 50, 51],                   # optional
 }
 ```

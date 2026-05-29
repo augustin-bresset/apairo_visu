@@ -24,7 +24,7 @@ def normalize_color_map(color_map: dict) -> dict[int, list[int]]:
 def labels_to_colors(
     labels: np.ndarray, color_map: dict[int, list[int]]
 ) -> np.ndarray:
-    """Map label array to (N, 3) float64 RGB in [0, 1]. Unknown labels → gray."""
+    """Map label array to (N, 3) float64 RGB in [0, 1]. Unknown labels -> gray."""
     default = [128, 128, 128]
     colors = np.array(
         [color_map.get(int(l), default) for l in labels], dtype=np.float64
