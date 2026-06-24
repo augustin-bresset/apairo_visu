@@ -72,22 +72,28 @@ label_cfg = apairo_visu.load_label_config("/path/to/my_classes.yaml")
 apairo_visu.LidarViewer.launch(my_dataset, view_cfg=view_cfg, label_cfg=label_cfg)
 ```
 
-## Using NearestSyncDataset to access multiple channels
+## Async datasets: synchronise multiple channels
 
-When you need both the point cloud and another channel (e.g. odometry) in each sample:
+When you need both the point cloud and another channel (e.g. odometry) in each
+sample, use apairo's built-in `synchronize()` -- see [sync.md](sync.md):
 
 ```python
 import apairo
 import apairo_visu
-import numpy as np
 
-ds_raw = apairo.TartanKittiDataset(seq_dir, keys=["velodyne_0", "super_odom"])
-ds = apairo_visu.NearestSyncDataset(ds_raw, reference_key="velodyne_0")
+ds = apairo.TartanKittiDataset(seq_dir, keys=["velodyne_0", "super_odom"]) \
+           .synchronize(reference="velodyne_0", method="nearest")
 
-# sample.data now contains both keys, synchronized to the LiDAR timestamps
+# sample.data now contains both keys, aligned to the LiDAR timestamps
 sample = ds[0]
 print(sample.data["velodyne_0"].shape)   # (N, 3)
 print(sample.data["super_odom"].shape)   # (7,)
+
+apairo_visu.LidarViewer.launch(
+    ds,
+    view_cfg=apairo_visu.ViewConfig(point_key="velodyne_0", label_key=None),
+    poses=apairo_visu.load_poses(ds, key="super_odom"),
+)
 ```
 
 ---
@@ -132,6 +138,20 @@ def model_a(pts, labels):
     logits = net_a(torch.from_numpy(pts).cuda())
     pred   = logits.argmax(dim=-1).cpu().numpy().astype(np.int64)
     return pts, pred
+```
+
+A pipeline step can also be an apairo `FramePreprocessor` -- its `input_keys`
+are fed from `pts` / `labels`, and the array returned by `process` becomes the
+new per-point labels. This lets you preview a real segmentation preprocessor
+before persisting it with `run_preprocess`:
+
+```python
+from apairo_preprocess import TraversabilityFromLabels
+
+apairo_visu.LidarViewer.launch(ds, label_cfg=cfg, pipelines=[
+    Pipeline("Semantic GT"),
+    Pipeline("Traversability", [TraversabilityFromLabels()]),  # FramePreprocessor
+])
 ```
 
 Pipelines run in **parallel** -- each viewport updates as soon as its pipeline finishes.  Elapsed time per pipeline is shown in the left panel.

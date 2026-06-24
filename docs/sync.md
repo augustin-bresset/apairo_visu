@@ -1,12 +1,14 @@
-# NearestSyncDataset
+# Synchronising async datasets
 
-Utility for working with apairo's async (multi-channel, time-stamped) datasets in a viewer context.
+Some apairo datasets (e.g. `TartanKittiDataset`) are **asynchronous**: each
+channel lives on its own timeline, so `dataset[i]` returns a `Sample` with a
+single key -- the *i*-th event in the merged timeline. The viewer expects
+**synchronous** frames where `dataset[i]` carries every channel at once.
 
-## Motivation
-
-Async apairo datasets (like `TartanKittiDataset`) store multiple channels on independent timelines. `dataset[i]` returns a `Sample` with **one key only** -- the i-th event in the merged timeline, which could be from any channel. This makes sequential frame-by-frame navigation difficult.
-
-`NearestSyncDataset` wraps an async dataset and presents it as a **synchronous** dataset aligned to one reference channel. Each `dataset[i]` returns a complete `Sample` with all channels, synchronized by nearest-timestamp matching.
+You do **not** need a viewer-specific wrapper for this: apairo ships a
+`synchronize()` method on every dataset. (Earlier versions of `apairo_visu`
+shipped a `NearestSyncDataset` helper -- it has been removed in favour of the
+built-in, which is faster, lazier and supports interpolation and tolerances.)
 
 ## Usage
 
@@ -14,42 +16,38 @@ Async apairo datasets (like `TartanKittiDataset`) store multiple channels on ind
 import apairo
 import apairo_visu
 
-# Load async dataset with two channels
-ds_raw = apairo.TartanKittiDataset(seq_dir, keys=["velodyne_0", "super_odom"])
+# Async dataset with two channels on independent clocks
+ds_async = apairo.TartanKittiDataset(seq_dir, keys=["velodyne_0", "super_odom"])
 
-# Wrap: align everything to the velodyne_0 timeline
-ds = apairo_visu.NearestSyncDataset(ds_raw, reference_key="velodyne_0")
+# Resample onto the velodyne clock: each frame now carries both channels
+ds = ds_async.synchronize(reference="velodyne_0", method="nearest")
 
-# Now ds[i] returns a Sample with both keys, synchronized
 sample = ds[0]
-pts   = sample.data["velodyne_0"]   # (N, 3) point cloud
-odom  = sample.data["super_odom"]   # (7,)   odometry at nearest timestamp
+pts  = sample.data["velodyne_0"]   # (N, 3) point cloud
+odom = sample.data["super_odom"]   # odometry at the nearest timestamp
+
+apairo_visu.LidarViewer.launch(
+    ds,
+    view_cfg=apairo_visu.ViewConfig(point_key="velodyne_0", label_key=None),
+    poses=apairo_visu.load_poses(ds, key="super_odom"),   # trajectory overlay
+)
 ```
 
-## How it works
+## `synchronize()` in one line
 
-At construction time, for each non-reference key the wrapper pre-computes an index mapping:
+| Argument | Meaning |
+|---|---|
+| `reference` | Channel name providing the clock (or an array of timestamps, or `None` for the lowest-frequency channel). |
+| `method` | `"nearest"` (closest event), `"latest"` (last event with `t ≤ t_ref`, online-style), a custom `(channel_ts, ref_ts) -> indices` callable, or an `Interpolator`. |
+| `tolerance` | Max `\|t − t_ref\|` in seconds; frames with any channel out of tolerance are dropped. |
 
-```
-for each reference frame i:
-    frame_idx[key][i] = argmin |timestamps[key] - reference_timestamps[i]|
-```
+The result is a normal synchronous apairo view -- `len()`, random access,
+`filter`, `select`, `cache` and PyTorch `DataLoader` all work on it, and so does
+`LidarViewer`. See the apairo docs for the full contract.
 
-At access time, `__getitem__(i)` calls `dataset.loaders[key][frame_idx[key][i]]` for every key. No data is cached -- each access re-reads from the underlying loaders.
+## Trajectory overlay
 
-## API
-
-```python
-class NearestSyncDataset:
-    def __init__(self, dataset, reference_key: str): ...
-    def __len__(self) -> int: ...
-    def __getitem__(self, idx: int) -> Sample: ...
-```
-
-The returned object supports `len()`, index access, and iteration -- the same interface expected by `LidarViewer`.
-
-## Caveats
-
-- **Temporal lag**: nearest-neighbor matching introduces up to half the inter-frame interval of the non-reference channel. For a 100 Hz odometry matched to a 10 Hz LiDAR, the maximum lag is 5 ms -- negligible for most use cases.
-- **End-of-sequence boundary**: the last few reference frames may be matched to the same final non-reference frame if the channels do not have exactly the same duration.
-- **Large datasets**: the index mapping is built entirely in memory at construction time. For a dataset with N reference frames and M non-reference frames, the construction cost is O(N x M) time and O(N) memory per non-reference key.
+A synchronised odometry channel pairs naturally with the viewer's trajectory
+overlay: `apairo_visu.load_poses(ds, key="super_odom")` normalises each
+`[x, y, z, qx, qy, qz, qw]` row (trailing columns ignored) to a `4×4`
+`T_world_sensor` matrix. See [`examples/view_tartandrive.py`](../examples/view_tartandrive.py).

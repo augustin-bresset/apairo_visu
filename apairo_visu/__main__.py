@@ -10,32 +10,24 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import importlib
 
-from . import LidarViewer, ViewConfig, load_label_config
+from .config import ViewConfig, load_label_config
 
-_DATASET_CLASSES = {
-    "goose": ("apairo", "Goose3DDataset"),
-    "rellis": ("apairo", "Rellis3DDataset"),
-    "semantic_kitti": ("apairo", "SemanticKittiDataset"),
-}
-
-_DATASET_KEYS = {
-    "goose": ("lidar", "labels"),
-    "rellis": ("lidar", "labels"),
-    "semantic_kitti": ("lidar", "labels"),
+# dataset name -> (apairo class, point key, label key)
+_DATASETS = {
+    "goose":          ("Goose3DDataset",       "lidar", "labels"),
+    "rellis":         ("Rellis3DDataset",      "lidar", "labels"),
+    "semantic_kitti": ("SemanticKittiDataset", "lidar", "labels"),
 }
 
 
-def _load_dataset(name: str, root: str, split: str | None):
-    if name not in _DATASET_CLASSES:
-        raise ValueError(
-            f"Unknown dataset '{name}'. Known: {sorted(_DATASET_CLASSES)}"
-        )
-    module_name, class_name = _DATASET_CLASSES[name]
-    import importlib
-    mod = importlib.import_module(module_name)
-    cls = getattr(mod, class_name)
-    kwargs = {}
+def _load_dataset(name: str, root: str, split: str | None, keys: list[str]):
+    if name not in _DATASETS:
+        raise ValueError(f"Unknown dataset '{name}'. Known: {sorted(_DATASETS)}")
+    class_name = _DATASETS[name][0]
+    cls = getattr(importlib.import_module("apairo"), class_name)
+    kwargs = {"keys": keys}
     if split is not None:
         kwargs["split"] = split
     return cls(root, **kwargs)
@@ -43,7 +35,7 @@ def _load_dataset(name: str, root: str, split: str | None):
 
 def main() -> None:
     p = argparse.ArgumentParser(description="apairo_visu -- LiDAR dataset viewer")
-    p.add_argument("--dataset", required=True, help="Dataset name (goose | rellis | semantic_kitti)")
+    p.add_argument("--dataset", required=True, help=f"Dataset name ({' | '.join(_DATASETS)})")
     p.add_argument("--root", required=True, help="Path to dataset root directory")
     p.add_argument("--split", default=None, help="Dataset split (train | val | test)")
     p.add_argument("--cfg", default=None, help="Path to a custom label YAML config (default: built-in)")
@@ -51,12 +43,14 @@ def main() -> None:
     p.add_argument("--no-labels", action="store_true", help="Disable label loading")
     args = p.parse_args()
 
-    dataset = _load_dataset(args.dataset, args.root, args.split)
+    if args.dataset not in _DATASETS:
+        raise SystemExit(f"Unknown dataset '{args.dataset}'. Known: {sorted(_DATASETS)}")
+    _, point_key, label_key = _DATASETS[args.dataset]
 
-    cfg_path = args.cfg or args.dataset
-    label_cfg = load_label_config(cfg_path) if not args.no_labels else None
+    keys = [point_key] if args.no_labels else [point_key, label_key]
+    dataset = _load_dataset(args.dataset, args.root, args.split, keys)
 
-    point_key, label_key = _DATASET_KEYS.get(args.dataset, ("lidar", "labels"))
+    label_cfg = None if args.no_labels else load_label_config(args.cfg or args.dataset)
     view_cfg = ViewConfig(
         point_key=point_key,
         label_key=None if args.no_labels else label_key,
@@ -64,6 +58,9 @@ def main() -> None:
 
     print(f"Dataset: {args.dataset}  ({len(dataset)} frames)")
     print(f"Starting at frame {args.idx}")
+
+    # Imported here so `--help` works without an Open3D / display dependency.
+    from .viewer import LidarViewer
     LidarViewer.launch(dataset, view_cfg=view_cfg, label_cfg=label_cfg, start_idx=args.idx)
 
 

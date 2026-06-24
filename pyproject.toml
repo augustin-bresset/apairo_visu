@@ -28,3 +28,7 @@ include = ["apairo_visu*"]
 
 [tool.setuptools.package-data]
 apairo_visu = ["configs/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+

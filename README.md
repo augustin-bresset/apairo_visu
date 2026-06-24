@@ -67,10 +67,27 @@ python -m apairo_visu --dataset semantic_kitti --root /data/kitti --split train 
 | `R` | Reset camera (all viewports) |
 | `J` | Toggle trajectory overlay |
 
+## Project layout
+
+```
+apairo_visu/
+  config.py     ViewConfig + load_label_config
+  pipeline.py   Pipeline + apairo FramePreprocessor bridge
+  colors.py     colour maps (semantic / intensity / height)
+  geometry.py   pure-numpy helpers (hover projection, trajectory) + Open3D builders
+  poses.py      load_poses: pose channel -> 4x4 matrices
+  viewer.py     LidarViewer (Open3D GUI)
+  __main__.py   CLI
+```
+
+The light layer (`config`, `pipeline`, `colors`, `geometry`, `poses`) imports
+only numpy/PyYAML, so `import apairo_visu` works headless; Open3D is pulled in
+lazily the first time `LidarViewer` is used.
+
 ## Documentation
 
 - [Getting started](docs/getting_started.md)
 - [LidarViewer API](docs/viewer.md)
 - [Label configurations](docs/label_configs.md)
-- [NearestSyncDataset](docs/sync.md)
+- [Synchronising async datasets](docs/sync.md)
 - [Examples](docs/examples.md)

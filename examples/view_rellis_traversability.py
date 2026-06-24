@@ -43,10 +43,9 @@ def main() -> None:
     ds = apairo.Rellis3DDataset(root, keys=["lidar", "labels", "poses"])
     print(f"  {len(ds)} scans")
 
-    # Poses: 3×4 (apairo TXTLoader) → 4×4
-    n = len(ds)
-    poses_4x4 = np.eye(4)[None].repeat(n, axis=0)
-    poses_4x4[:, :3, :] = np.stack([ds[i].data["poses"] for i in range(n)])
+    # Poses: apairo stores RELLIS poses as 3×4; load_poses lifts each to 4×4.
+    # TraversabilityFromTrajectory wants a single (N, 4, 4) array.
+    poses_4x4 = np.stack(apairo_visu.load_poses(ds, key="poses"))
 
     cfg_trav = {
         "color_map":    {0: [200, 50, 50], 1: [50, 200, 80]},

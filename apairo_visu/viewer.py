@@ -1,7 +1,7 @@
 """Interactive 3-D LiDAR viewer for apairo datasets -- multi-pipeline edition.
 
-Usage (single viewport, no transform -- backward compatible):
-    from apairo_visu import LidarViewer, ViewConfig, load_label_config
+Usage (single viewport, no transform):
+    from apairo_visu import LidarViewer, load_label_config
     cfg = load_label_config("goose")
     LidarViewer.launch(dataset, label_cfg=cfg)
 
@@ -14,9 +14,8 @@ Usage (compare multiple pipelines side-by-side):
         Pipeline("Model B", [preprocess, model_b]),
     ])
 
-Each Pipeline step is a callable: (pts: ndarray, labels: ndarray|None) -> (pts, labels).
-Pipelines execute in parallel via a thread pool; each viewport updates as soon as
-its pipeline finishes (useful when inference is slow).
+Pipelines execute in parallel via a thread pool; each viewport updates as soon
+as its pipeline finishes (useful when inference is slow).
 
 Keyboard shortcuts:
     Right / L   next frame
@@ -31,8 +30,6 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from typing import Callable
 
 import numpy as np
 import open3d as o3d
@@ -46,6 +43,16 @@ from .colors import (
     labels_to_colors,
     normalize_color_map,
 )
+from .config import ViewConfig
+from .geometry import (
+    has_extent,
+    make_lineset,
+    make_point_cloud,
+    pick_nearest,
+    poses_to_local,
+    to_numpy,
+)
+from .pipeline import Pipeline
 
 PANEL_W = 290
 POINT_SIZE = 2.5
@@ -56,142 +63,30 @@ C_TRAJ_PAST   = [0.20, 0.60, 1.00]
 C_TRAJ_FUTURE = [1.00, 0.60, 0.10]
 
 
-# ---------------------------------------------------------------------------
-# Public data types
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ViewConfig:
-    """Mapping from :class:`apairo.Sample` keys to viewer inputs.
-
-    Tells the viewer which tensors to extract from ``sample.data`` on each
-    frame.  All fields correspond to keys in the ``Sample.data`` dict returned
-    by ``dataset[idx]``.
-
-    Attributes:
-        point_key: Key for the point cloud tensor, shape ``(N, C)`` float32.
-            The first three columns must be X, Y, Z.
-        label_key: Key for the per-point semantic label tensor, shape ``(N,)``
-            int64.  Set to ``None`` to disable label-based display modes; the
-            viewer will then start in **Height** mode.
-        intensity_channel: Column index of the intensity channel.  Ignored when
-            the tensor has fewer than ``intensity_channel + 1`` columns (falls
-            back silently to Height mode).
-    """
-
-    point_key: str = "lidar"
-    label_key: str | None = "labels"
-    intensity_channel: int = 3
-
-
-@dataclass
-class Pipeline:
-    """Named sequence of per-frame transforms applied before rendering.
-
-    Each step is a callable with signature::
-
-        step(pts: np.ndarray, labels: np.ndarray | None)
-            -> tuple[np.ndarray, np.ndarray | None]
-
-    Steps are applied in order; the output of each step is passed as input to
-    the next.  Pass an empty ``steps`` list (the default) to display the raw
-    frame without any transform.
-
-    One :class:`Pipeline` maps to one viewport in the viewer.  When multiple
-    pipelines are given to :meth:`LidarViewer.launch`, they run concurrently on
-    a shared thread pool and each viewport updates as soon as its pipeline
-    finishes -- useful when inference is slow.
-
-    Attributes:
-        name: Label shown in the viewport banner and in the timing panel.
-        steps: Ordered list of transform callables.
-
-    Examples::
-
-        Pipeline("Raw")                                  # no transform
-        Pipeline("Range filter", [range_filter])         # preprocessing only
-        Pipeline("Model A", [preprocess, model_a])       # preprocess -> inference
-    """
-
-    name: str
-    steps: list[Callable] = field(default_factory=list)
-
-    def run(
-        self,
-        pts: np.ndarray,
-        labels: np.ndarray | None,
-        frame_idx: int = 0,
-    ) -> tuple[np.ndarray, np.ndarray | None]:
-        import types
-        for step in self.steps:
-            if hasattr(step, "process") and hasattr(step, "input_keys"):
-                # apairo_preprocess FramePreprocessor — build a minimal Sample
-                # from pts / labels according to the processor's declared input_keys.
-                if hasattr(step, "_idx"):
-                    step._idx = frame_idx          # random-access for stateful procs
-                data = {}
-                for key in step.input_keys:
-                    if key == "lidar":
-                        data["lidar"] = pts
-                    elif key == "labels" and labels is not None:
-                        data["labels"] = labels
-                sample = types.SimpleNamespace(data=data)
-                result = step.process(sample)
-                if result is not None:
-                    labels = np.asarray(result, dtype=np.int64)
-            else:
-                try:
-                    pts, labels = step(pts, labels, frame_idx=frame_idx)
-                except TypeError:
-                    pts, labels = step(pts, labels)
-        return pts, labels
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _to_numpy(t) -> np.ndarray:
-    if hasattr(t, "numpy"):
-        return t.numpy()
-    return np.asarray(t)
-
-
-def _make_lineset(pts: np.ndarray, edges: list, color: list) -> o3d.geometry.LineSet:
-    ls = o3d.geometry.LineSet()
-    ls.points = o3d.utility.Vector3dVector(pts.astype(np.float64))
-    ls.lines  = o3d.utility.Vector2iVector(edges)
-    ls.colors = o3d.utility.Vector3dVector(np.tile(color, (len(edges), 1)))
-    return ls
-
-
-# ---------------------------------------------------------------------------
-# Viewer
-# ---------------------------------------------------------------------------
-
-
 class LidarViewer:
-    """Interactive 3-D LiDAR viewer for any apairo AbstractDataset.
+    """Interactive 3-D LiDAR viewer for any apairo synchronous dataset.
 
     Supports one or more named pipelines displayed side-by-side for comparison.
-    Each pipeline is a sequence of ``(pts, labels) -> (pts, labels)`` callables
-    applied before rendering.  Pipelines run in parallel via a thread pool; each
-    viewport updates as soon as its pipeline finishes.
+    Each pipeline is a sequence of ``(pts, labels) -> (pts, labels)`` steps
+    applied before rendering (see :class:`apairo_visu.Pipeline`).  Pipelines run
+    in parallel via a thread pool; each viewport updates as soon as its pipeline
+    finishes.
 
     Args:
-        dataset:   Any apairo synchronous dataset (SynchronousDataset subclass).
+        dataset:   Any apairo synchronous dataset (``dataset[idx]`` returns a
+                   ``Sample`` with a ``data`` dict).
         view_cfg:  Which keys to extract from each Sample.  Defaults to
                    ``point_key="lidar"`` and ``label_key="labels"``.
         label_cfg: Dict with ``color_map``, ``semantic_map``, and optionally
                    ``traversable_map``.  Use ``load_label_config(name)`` for
                    built-in configs.  Pass ``None`` to skip label colouring.
-        poses:     Optional list of 4x4 numpy pose matrices (T_world_sensor),
+        label_cfgs: Per-pipeline label configs; entries fall back to
+                   ``label_cfg`` when missing.
+        poses:     Optional list of 4x4 numpy pose matrices (``T_world_sensor``),
                    one per frame, for a trajectory overlay (viewport 0 only).
         start_idx: First frame to display.
-        pipelines: List of :class:`Pipeline` objects -- one viewport per entry.
-                   Defaults to ``[Pipeline("Raw", [])]`` (current frame, no transform).
+        pipelines: List of :class:`apairo_visu.Pipeline` objects -- one viewport
+                   per entry.  Defaults to ``[Pipeline("Raw", [])]``.
     """
 
     def __init__(
@@ -300,21 +195,7 @@ class LidarViewer:
     ) -> None:
         """Create the GUI application and block until the window is closed.
 
-        Args:
-            dataset:   Any apairo dataset -- must support ``dataset[idx]``
-                       returning a ``Sample`` with a ``data`` dict.
-            view_cfg:  Which keys to read from each ``Sample``.  Defaults to
-                       ``point_key="lidar"`` and ``label_key="labels"``.
-            label_cfg: Dict with ``color_map``, ``semantic_map``, and optionally
-                       ``traversable_map``.  Use :func:`load_label_config` for
-                       built-in configs.  Pass ``None`` to skip label colouring.
-            poses:     Optional list of 4x4 ``np.ndarray`` (T_world_sensor), one
-                       per frame.  Enables the trajectory overlay in viewport 0.
-            start_idx: Frame index to display first.
-            pipelines: List of :class:`Pipeline` objects -- one viewport per entry.
-                       Pipelines run in parallel; each viewport updates as soon as
-                       its pipeline finishes.  Defaults to
-                       ``[Pipeline("Raw", [])]``.
+        See the class docstring for the argument meanings.
         """
         app = gui.Application.instance
         app.initialize()
@@ -595,12 +476,7 @@ class LidarViewer:
         return gui.Widget.EventCallbackResult.IGNORED
 
     def _find_hover_point(self, lx: int, ly: int) -> int | None:
-        """Return the index of the point nearest to viewport-local (lx, ly).
-
-        Projects all cached points to screen space via the camera's view and
-        projection matrices, then returns the nearest point within a 15-pixel
-        screen-space radius.
-        """
+        """Index of the point nearest viewport-local ``(lx, ly)``, or ``None``."""
         pts = self._cached_pts[0]
         if pts is None or len(pts) == 0:
             return None
@@ -609,37 +485,10 @@ class LidarViewer:
             W, H = frame.width, frame.height
             if W <= 0 or H <= 0 or not (0 <= lx < W and 0 <= ly < H):
                 return None
-
             cam  = self._scenes[0].scene.camera
             view = np.asarray(cam.get_view_matrix())         # world -> camera
             proj = np.asarray(cam.get_projection_matrix())   # camera -> clip
-            VP   = proj @ view
-
-            xyz  = pts[:, :3].astype(np.float64)
-            N    = len(xyz)
-            xyz1 = np.hstack([xyz, np.ones((N, 1))])         # (N, 4)
-            clip = (VP @ xyz1.T).T                           # (N, 4)
-
-            w        = clip[:, 3]
-            in_front = w > 0
-            if not in_front.any():
-                return None
-
-            w_safe = np.where(in_front, w, 1.0)
-            ndc_x  = clip[:, 0] / w_safe
-            ndc_y  = clip[:, 1] / w_safe
-
-            # NDC -> viewport pixels  (NDC y=+1 -> top -> screen y=0)
-            sx = (ndc_x + 1.0) * 0.5 * W
-            sy = (1.0 - ndc_y) * 0.5 * H
-
-            dist2 = (sx - lx) ** 2 + (sy - ly) ** 2
-            dist2[~in_front] = np.inf
-            dist2[(ndc_x < -1) | (ndc_x > 1) | (ndc_y < -1) | (ndc_y > 1)] = np.inf
-
-            idx = int(np.argmin(dist2))
-            return idx if dist2[idx] <= 15 ** 2 else None
-
+            return pick_nearest(pts, view, proj, W, H, lx, ly, radius=15.0)
         except Exception:
             return None
 
@@ -818,13 +667,13 @@ class LidarViewer:
         pts_raw = sample.data.get(self.cfg.point_key)
         if pts_raw is None:
             return
-        pts = _to_numpy(pts_raw).astype(np.float32)
+        pts = to_numpy(pts_raw).astype(np.float32)
 
         labels: np.ndarray | None = None
         if self.cfg.label_key:
             lbl_raw = sample.data.get(self.cfg.label_key)
             if lbl_raw is not None:
-                labels = _to_numpy(lbl_raw).astype(np.int64)
+                labels = to_numpy(lbl_raw).astype(np.int64)
 
         self._raw_pts    = pts
         self._raw_labels = labels
@@ -917,9 +766,7 @@ class LidarViewer:
 
         colors = self._compute_colors(i, pts[mask], labels[mask] if labels is not None else None)
 
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(xyz_f)
-        pcd.colors = o3d.utility.Vector3dVector(colors)
+        pcd = make_point_cloud(xyz_f, colors)
         scene.add_geometry("cloud", pcd, self._mats[i])
 
         if not self._camera_initialized[i]:
@@ -945,34 +792,25 @@ class LidarViewer:
         scene.remove_geometry("traj_future")
 
         pose_cur = self._poses[self.current_idx]
-        T_inv    = np.linalg.inv(pose_cur)
-
-        def _world_to_local(poses_slice):
-            origins = np.array([p[:3, 3] for p in poses_slice])
-            h       = np.hstack([origins, np.ones((len(origins), 1))])
-            return (T_inv @ h.T).T[:, :3]
 
         mat_line = rendering.MaterialRecord()
         mat_line.shader     = "unlitLine"
         mat_line.line_width = 2.0
 
-        def _has_extent(pts: np.ndarray) -> bool:
-            return bool((pts.max(axis=0) - pts.min(axis=0)).sum() > 1e-6)
-
         if self.current_idx > 0:
-            past_pts = _world_to_local(self._poses[: self.current_idx + 1])
+            past_pts = poses_to_local(self._poses[: self.current_idx + 1], pose_cur)
             edges    = [[j, j + 1] for j in range(len(past_pts) - 1)]
-            if edges and _has_extent(past_pts):
+            if edges and has_extent(past_pts):
                 scene.add_geometry(
-                    "traj_past", _make_lineset(past_pts, edges, C_TRAJ_PAST), mat_line
+                    "traj_past", make_lineset(past_pts, edges, C_TRAJ_PAST), mat_line
                 )
 
         if self.current_idx < len(self._poses) - 1:
-            future_pts = _world_to_local(self._poses[self.current_idx:])
+            future_pts = poses_to_local(self._poses[self.current_idx:], pose_cur)
             edges      = [[j, j + 1] for j in range(len(future_pts) - 1)]
-            if edges and _has_extent(future_pts):
+            if edges and has_extent(future_pts):
                 scene.add_geometry(
-                    "traj_future", _make_lineset(future_pts, edges, C_TRAJ_FUTURE), mat_line
+                    "traj_future", make_lineset(future_pts, edges, C_TRAJ_FUTURE), mat_line
                 )
 
     # ------------------------------------------------------------------

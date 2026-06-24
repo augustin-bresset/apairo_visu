@@ -1,40 +1,35 @@
-"""apairo_visu -- interactive 3-D LiDAR visualisation for apairo datasets."""
+"""apairo_visu -- interactive 3-D LiDAR visualisation for apairo datasets.
 
-from pathlib import Path
+The light layer (``Pipeline``, ``ViewConfig``, ``load_label_config``,
+``load_poses``) imports only numpy / PyYAML, so it can be used in a headless
+context.  :class:`LidarViewer` pulls in Open3D and is therefore loaded lazily,
+the first time it is accessed::
 
-import yaml
+    import apairo_visu                      # no Open3D import yet
+    cfg = apairo_visu.load_label_config("goose")
+    apairo_visu.LidarViewer.launch(ds, label_cfg=cfg)   # Open3D loaded here
+"""
 
-from .viewer import LidarViewer, ViewConfig, Pipeline
-from .sync import NearestSyncDataset
+from __future__ import annotations
 
-_CONFIGS_DIR = Path(__file__).parent / "configs"
-
-BUILTIN_CONFIGS = {"goose", "rellis", "semantic_kitti"}
-
-
-def load_label_config(name_or_path: str | Path) -> dict:
-    """Load a label config dict from a built-in name or a YAML file path.
-
-    Args:
-        name_or_path: One of ``"goose"``, ``"rellis"``, ``"semantic_kitti"``,
-                      or a path to a custom YAML file.
-
-    Returns:
-        Dict with keys ``color_map``, ``semantic_map``, and optionally
-        ``traversable_map`` and ``ignore_index``.
-    """
-    p = Path(name_or_path)
-    if not p.suffix:
-        p = _CONFIGS_DIR / f"{name_or_path}.yaml"
-    with open(p) as f:
-        return yaml.safe_load(f)
-
+from .config import BUILTIN_CONFIGS, ViewConfig, load_label_config
+from .pipeline import Pipeline
+from .poses import load_poses, pose_to_matrix
 
 __all__ = [
     "LidarViewer",
     "ViewConfig",
     "Pipeline",
-    "NearestSyncDataset",
     "load_label_config",
+    "load_poses",
+    "pose_to_matrix",
     "BUILTIN_CONFIGS",
 ]
+
+
+def __getattr__(name: str):
+    # PEP 562: defer the Open3D import until LidarViewer is actually used.
+    if name == "LidarViewer":
+        from .viewer import LidarViewer
+        return LidarViewer
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

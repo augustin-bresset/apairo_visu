@@ -6,11 +6,13 @@ Demonstrates three comparison scenarios (select with --demo):
   models       Two stub models predicting labels on the same frame.
   full         Four-way: raw | preprocess | preprocess+model A | preprocess+model B.
 
-Each pipeline is a list of callables with signature::
+Each pipeline step is either a callable with signature::
 
     step(pts: np.ndarray, labels: np.ndarray | None)
         -> tuple[np.ndarray, np.ndarray | None]
 
+or an apairo ``FramePreprocessor`` (its ``process`` output becomes the new
+labels -- handy for dropping a real segmentation preprocessor straight in).
 Replace the stub models below with your actual inference calls.
 
 **Active pipeline toggles** -- the left panel has an "Active pipelines" section with one

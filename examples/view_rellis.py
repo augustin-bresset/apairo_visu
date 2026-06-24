@@ -63,25 +63,6 @@ def range_filter(
 
 
 # ---------------------------------------------------------------------------
-# Pose helpers
-# ---------------------------------------------------------------------------
-
-def _3x4_to_4x4(T34: np.ndarray) -> np.ndarray:
-    T = np.eye(4, dtype=np.float64)
-    T[:3, :] = T34
-    return T
-
-
-def load_poses(ds: apairo.Rellis3DDataset) -> list[np.ndarray]:
-    """Extract 4x4 pose matrices from the dataset's ``poses`` key (3x4 -> 4x4).
-
-    The ``TXTLoader`` pre-loads all rows at init, so this loop is just
-    numpy slicing -- no I/O happens here.
-    """
-    return [_3x4_to_4x4(ds[i].data["poses"]) for i in range(len(ds))]
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -109,15 +90,11 @@ def main() -> None:
     ds = apairo.Rellis3DDataset(root, keys=["lidar", "labels", "poses"])
     print(f"  {len(ds)} scans")
 
-    # --- Poses: 3x4 (apairo TXTLoader) -> 4x4 ---
+    # --- Poses: apairo stores RELLIS poses as 3x4; load_poses lifts to 4x4 ---
     poses = None
     if not args.no_poses:
-        poses = load_poses(ds)
-        if len(poses) != len(ds):
-            print(f"  [WARN] Pose count ({len(poses)}) != scan count ({len(ds)}) -- skipping")
-            poses = None
-        else:
-            print(f"  {len(poses)} poses loaded")
+        poses = apairo_visu.load_poses(ds, key="poses")
+        print(f"  {len(poses)} poses loaded")
 
     # --- Pipeline (single viewport, range-filtered) ---
     pipelines = [Pipeline("RELLIS-3D", [range_filter])]

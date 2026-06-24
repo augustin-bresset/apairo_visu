@@ -54,13 +54,14 @@ class Pipeline:
     steps: list[Callable] = field(default_factory=list)
 ```
 
-A named sequence of per-frame transforms.  Each step is a callable:
+A named sequence of per-frame transforms.  Each step is either a callable:
 
 ```python
 step(pts: np.ndarray, labels: np.ndarray | None)
     -> tuple[np.ndarray, np.ndarray | None]
 ```
 
+or an apairo `FramePreprocessor` (its `process` output becomes the new labels).
 Steps are applied in order.  Pass an empty `steps` list to display the raw frame.
 
 One `Pipeline` = one viewport.  When multiple pipelines are provided, they run **in parallel** on a thread pool and each viewport updates as soon as its pipeline finishes.
@@ -190,7 +191,8 @@ When `poses` is provided, the viewer draws in viewport 0:
 Both are rendered in the **current sensor frame**: all trajectory waypoints (world-frame origins from the pose matrices) are transformed into the coordinate system of the current LiDAR scan using `T_sensor_world = inv(poses[current_idx])`.
 
 ```python
-poses = [T_world_sensor_0, T_world_sensor_1, ...]   # list of (4, 4) float64
+# From a dataset pose channel (3x4 / 4x4 / [x y z qx qy qz qw] all handled):
+poses = apairo_visu.load_poses(ds, key="poses")     # list of (4, 4) float64
 apairo_visu.LidarViewer.launch(ds, poses=poses)
 ```
 
@@ -208,7 +210,9 @@ In multi-pipeline mode each viewport has an independent camera, allowing you to 
 app = gui.Application.instance
 app.initialize()
 
-viewer = apairo_visu.LidarViewer(dataset, view_cfg, label_cfg, poses, pipelines=pipelines)
+viewer = apairo_visu.LidarViewer(
+    dataset, view_cfg=view_cfg, label_cfg=label_cfg, poses=poses, pipelines=pipelines
+)
 viewer._build_window()
 app.run()
 ```
