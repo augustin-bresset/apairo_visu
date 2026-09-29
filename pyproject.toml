@@ -27,7 +27,14 @@ visu = "apairo_visu.__main__:main"
 rerun = "apairo_visu.rerun.cli:main"
 
 [project.optional-dependencies]
-studio = ["fastapi", "uvicorn[standard]"]
+# projector-engine (import name `projector`) ships the shared three.js point-cloud
+# engine the studio's 3D view runs on, served from its install via
+# projector.web_engine_dir(). Not on PyPI yet: pinned to its release tag.
+studio = [
+    "fastapi",
+    "uvicorn[standard]",
+    "projector-engine @ git+https://github.com/augustin-bresset/projector.git@v0.1.0",
+]
 rerun = ["rerun-sdk"]
 dev = ["pytest", "httpx"]
 
@@ -41,7 +48,6 @@ apairo_visu = [
     "studio/web/*.html",
     "studio/web/*.css",
     "studio/web/src/*.js",
-    "studio/web/src/engine/*.js",
     "studio/web/vendor/three/*.js",
     "studio/web/vendor/three/addons/controls/*.js",
 ]

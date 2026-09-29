@@ -692,4 +692,7 @@ def test_static_front_served_with_ssr_graph(client):
     assert 'data-node="n0"' in index.text  # SSR-lite: graph in first paint
     assert client.get("/src/app.js").status_code == 200
     assert client.get("/src/resize.js").status_code == 200
+    # the 3D engine comes from projector's install, at the URL datapanel.js imports
+    assert client.get("/src/engine/viewer.js").status_code == 200
+    assert client.get("/src/engine/octree-worker.js").status_code == 200
     assert client.get("/style.css").status_code == 200

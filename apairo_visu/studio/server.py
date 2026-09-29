@@ -21,6 +21,7 @@ import numpy as np
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from projector import web_engine_dir
 
 from .. import graph_render
 from .catalog import Catalog
@@ -172,6 +173,9 @@ def create_app(
     def index() -> str:
         return index_html
 
+    # Shared three.js engine, served from projector's install. Mounted BEFORE the
+    # "/" catch-all so /src/engine/* resolves here (the URL datapanel.js imports).
+    app.mount("/src/engine", StaticFiles(directory=web_engine_dir()), name="engine")
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
     return app
 

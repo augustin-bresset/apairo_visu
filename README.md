@@ -137,7 +137,7 @@ Shipped so far:
   panel is bound to one node+channel with a selectable presentation (auto,
   3D, BEV scatter, image, raster heatmap, histogram, values). Point clouds
   with xyz columns open in the **3D viewer** by default (three.js engine
-  shared with toaster: trackball/orbit camera, motion LOD, fly keys); the
+  shared with toaster, served from projector-engine: trackball/orbit camera, motion LOD, fly keys); the
   BEV stays one select away. The **BEV zooms**: scroll to zoom at the
   cursor, drag a box to zoom on a selection, shift-drag to pan,
   double-click to reset. Clouds color by any of their own columns **or by a
